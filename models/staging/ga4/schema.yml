@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: stg_ga4__traffic_source
+    description: "Staging GA4 traffic acquisition data"
+    columns:
+      - name: date
+        tests: [not_null]
+      - name: session_source
+        tests: [not_null]
+      - name: session_medium
+        tests: [not_null]
+      - name: sessions
+        tests: [not_null]
+
+  - name: stg_ga4__pages
+    description: "GA4 page-level metrics from raw Airbyte export"
+    columns:
+      - name: event_date
+        description: "Date of event"
+        tests: [not_null]
+      - name: page_path
+        description: "URL path + query string"
+        tests: [not_null]
+      - name: page_views
+        description: "Page views for this page"
+      - name: bounce_rate
+        description: "Bounce rate"
+      - name: host_name
+        description: "Host domain for the page"
+
+  - name: fct_ga4__page_metrics_daily
+    description: "Daily aggregated page performance metrics from GA4"
+    columns:
+      - name: event_date
+        description: "Date of the page view event"
+        tests: [not_null]
+      - name: page_path
+        description: "URL path including query string"
+        tests: [not_null]
+      - name: page_view_events
+        description: "Number of page view rows recorded"
+      - name: total_page_views
+        description: "Sum of screenPageViews field"
+      - name: avg_bounce_rate
+        description: "Average bounce rate for the page on that day"

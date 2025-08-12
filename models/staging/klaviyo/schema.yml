@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: stg_klaviyo__events
+    description: "Cleaned Klaviyo events with JSON fields extracted"
+    columns:
+      - name: event_id
+        tests: [not_null]
+      - name: event_ts
+        tests: [not_null]
+      - name: event_date
+        tests: [not_null]
+      - name: metric_id
+        description: "Klaviyo metric identifier (e.g., email open/click/form submit)"
