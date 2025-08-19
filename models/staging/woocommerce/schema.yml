@@ -1,0 +1,173 @@
+version: 2
+
+models:
+  - name: stg_woocommerce_customers
+    description: >
+      Staging model for WooCommerce customers. One row per customer from
+      `raw_woocommerce.customers`, with normalized IDs, canonical email, names,
+      and timestamps.
+    columns:
+      - name: wc_customer_id
+        description: "WooCommerce internal customer id (cast to string)."
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_email
+        description: >
+          Canonical email for the customer. Takes top-level email if present,
+          else falls back to billing.email. Lowercased and trimmed.
+        tests:
+          - not_null: { config: { severity: warn } }
+          # Optional email regex check if dbt_utils is installed
+          # - dbt_utils.expression_is_true:
+          #     expression: "REGEXP_CONTAINS({{ column_name }}, r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')"
+          #     config: { severity: warn }
+
+      - name: first_name
+        description: "Customer first name from WooCommerce."
+        tests:
+          - not_null: { config: { severity: warn } }
+
+      - name: last_name
+        description: "Customer last name from WooCommerce."
+        tests:
+          - not_null: { config: { severity: warn } }
+
+      - name: first_seen_at
+        description: "Timestamp when the customer record was created in WooCommerce."
+        tests:
+          - not_null
+
+      - name: last_seen_at
+        description: "Timestamp when the customer record was last modified in WooCommerce."
+        tests:
+          - not_null
+
+  - name: stg_woocommerce_orders
+    description: >
+      Staging model for WooCommerce orders. Cleans and standardizes raw order
+      data from `raw_woocommerce.orders`, including customer info, totals, and
+      order lifecycle timestamps.
+    columns:
+      - name: order_id
+        description: "Unique identifier for the WooCommerce order."
+        tests:
+          - not_null
+          - unique
+      - name: order_number
+        description: "Human-friendly order number from WooCommerce."
+        tests:
+          - not_null
+      - name: order_status
+        description: "WooCommerce order status (e.g., processing, completed)."
+      - name: order_total
+        description: "Total amount of the order."
+        tests:
+          - not_null
+      - name: discount_total
+        description: "Total discount amount applied to the order."
+      - name: total_tax
+        description: "Total tax applied to the order."
+      - name: shipping_total
+        description: "Total shipping cost for the order."
+      - name: discount_tax
+        description: "Tax applied on the discount."
+      - name: shipping_tax
+        description: "Tax applied on the shipping cost."
+      - name: customer_email
+        description: "Email address of the customer who placed the order."
+      - name: wc_customer_id
+        description: "WooCommerce internal customer ID."
+      - name: order_date
+        description: "Date (or timestamp) when the order was created."
+        tests:
+          - not_null
+      - name: paid_at
+        description: "Timestamp when the order was paid."
+      - name: completed_at
+        description: "Timestamp when the order was completed."
+      - name: modified_at
+        description: "Timestamp when the order was last modified."
+      - name: payment_method
+        description: "Payment method used (e.g., credit_card, paypal)."
+      - name: payment_method_title
+        description: "Readable label of the payment method."
+      - name: customer_note
+        description: "Optional note left by the customer."
+      - name: customer_ip_address
+        description: "IP address of the customer placing the order."
+      - name: customer_user_agent
+        description: "User agent string of the customer’s browser/device."
+
+  - name: stg_woocommerce__order_items
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: order_item_id
+        tests: [not_null]
+      - name: sku
+        tests:
+          - not_null:
+              where: "product_id is not null"
+
+  - name: stg_woocommerce_shipping_lines
+    description: >
+      One row per shipping line on a WooCommerce order. Explodes
+      `raw_woocommerce.orders.shipping_lines` and standardizes common fields.
+    columns:
+      - name: order_id
+        description: "WooCommerce order ID."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_woocommerce_orders')
+              field: order_id
+      - name: order_ts
+        description: "Timestamp when the order was created (warehouse timezone)."
+      - name: order_date
+        description: "Partitioning date derived from order_ts."
+        tests:
+          - not_null
+      - name: shipping_line_id
+        description: "Unique id of the shipping line within an order."
+        tests:
+          - not_null
+      - name: method_id
+        description: "Shipping method identifier (e.g., flexible_shipping_ups, FEDEX_*)."
+      - name: method_title
+        description: "Human-friendly shipping method name."
+      - name: tax_status
+        description: "WooCommerce tax status for this shipping line."
+        tests:
+          - accepted_values:
+              values: ['taxable', 'none']
+              quote: true
+      - name: shipping_total
+        description: "Total shipping amount for this line."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "shipping_total >= 0"
+      - name: shipping_tax_total
+        description: "Total tax amount applied to this shipping line."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "shipping_tax_total >= 0"
+      - name: carrier_service_code
+        description: "Inferred carrier/service code (from meta or method_id)."
+      - name: service_type
+        description: "Carrier service type from meta (if provided)."
+      - name: collection_point
+        description: "Collection/pickup point metadata (if provided)."
+      - name: delivery_dates
+        description: "Delivery date information from meta (raw string)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: ['order_id', 'shipping_line_id']
+
+  - name: stg_woocommerce__tax_lines
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: tax_line_id
+        tests: [not_null]
