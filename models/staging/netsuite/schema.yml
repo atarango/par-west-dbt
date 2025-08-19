@@ -1,0 +1,98 @@
+version: 2
+
+models:
+  - name: stg_netsuite_customer
+    description: >
+      Staged NetSuite customers from raw_netsuite.customers. One row per customer,
+      exposing the internal id, primary email, company name, and create/modify timestamps.
+    columns:
+      - name: ns_customer_id
+        description: "NetSuite internal customer id (cast to string)."
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_email
+        description: "Primary customer email, lowercased and trimmed."
+        tests:
+          - not_null: { config: { severity: warn } }
+          # Optional: enable if dbt_utils is installed
+          # - dbt_utils.expression_is_true:
+          #     expression: "REGEXP_CONTAINS({{ column_name }}, r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')"
+          #     config: { severity: warn }
+
+      - name: company_name
+        description: "Customer company name from NetSuite."
+        tests:
+          - not_null
+
+      - name: first_seen_at
+        description: "Timestamp when the customer record was created in NetSuite."
+        tests:
+          - not_null
+
+      - name: last_seen_at
+        description: "Timestamp when the customer record was last modified in NetSuite."
+        tests:
+          - not_null
+
+  - name: stg_netsuite_orders
+    description: >
+      Staged NetSuite sales orders from raw_netsuite.salesorder. Incremental, partitioned by order_date,
+      clustered by customer_email. Excludes VOID/CANCELLED orders.
+    columns:
+      - name: order_id
+        description: "NetSuite internal sales order id (cast to string)."
+        tests:
+          - not_null
+          - unique
+
+      - name: order_date
+        description: "Transaction date cast to DATE (used for partitioning)."
+        tests:
+          - not_null
+
+      - name: ns_customer_id
+        description: "Foreign key to the NetSuite customer internal id."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_netsuite_customer')
+              field: ns_customer_id
+
+      - name: customer_email
+        description: "Buyer email (lowercased, trimmed) from email or custbody_nps_buyer_email."
+        tests:
+          - not_null: { config: { severity: warn } }
+
+      - name: order_amount
+        description: "Total order amount (cast to numeric)."
+        tests:
+          - not_null
+          # Optional numeric sanity check (dbt-expectations)
+          # - dbt_expectations.expect_column_values_to_be_between:
+          #     min_value: 0
+          #     strictly: false
+          #     config: { severity: warn }
+
+      - name: currency
+        description: "Order currency (uppercased), from currency.refName or scalar value."
+        tests:
+          - not_null: { config: { severity: warn } }
+          # Optional: basic ISO currency format check (3+ uppercase letters)
+          # - dbt_utils.expression_is_true:
+          #     expression: "REGEXP_CONTAINS({{ column_name }}, r'^[A-Z]{3,}$')"
+          #     config: { severity: warn }
+
+      - name: order_source
+        description: "Constant lineage flag for the record source ('netsuite')."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['netsuite']
+
+      - name: status
+        description: "Order status from orderStatus/status (object.refName or scalar)."
+        tests:
+          - not_null: { config: { severity: warn } }
+          # If you want to lock down allowed values later, add accepted_values here.

@@ -2,6 +2,8 @@ version: 2
 
 sources:
   - name: raw_ga4
+    database: par-west-ai-dashboard   # BigQuery project
+    schema: raw_ga4                   # BigQuery dataset
     tables:
       - name: daily_active_users
       - name: devices
@@ -18,6 +20,8 @@ sources:
       - name: weekly_events_report
 
   - name: raw_google_ads
+    database: par-west-ai-dashboard
+    schema: raw_google_ads
     tables:
       - name: account_performance_report
       - name: campaign
@@ -34,6 +38,8 @@ sources:
       - name: user_location_view
 
   - name: raw_klaviyo
+    database: par-west-ai-dashboard
+    schema: raw_klaviyo
     tables:
       - name: campaigns
       - name: events
@@ -43,6 +49,8 @@ sources:
       - name: profiles
 
   - name: raw_woocommerce
+    database: par-west-ai-dashboard
+    schema: raw_woocommerce
     tables:
       - name: coupons
       - name: customers
@@ -53,3 +61,14 @@ sources:
       - name: products
       - name: refunds
       - name: shipping_methods
+
+  - name: raw_netsuite
+    database: par-west-ai-dashboard
+    schema: raw_netsuite
+    tables:
+      - name: contact
+      - name: customer
+      - name: inventoryitem
+      - name: invoice
+      - name: itemfulfillment
+      - name: salesorder

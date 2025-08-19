@@ -35,8 +35,56 @@ clean-targets:         # directories to be removed by `dbt clean`
 # continue to be built as views. These settings can be overridden in the individual model files
 # using the `{{ config(...) }}` macro.
 
+# ---------- Model configuration by folder ----------
 models:
   my_new_project:
-    # Applies to all files under models/example/
-    example:
+
+    # Global defaults (override below as needed)
+    +persist_docs:
+      relation: true
+      columns: true
+
+    staging:                       # models/staging/**
+      +materialized: view
+      +tags: ["staging"]
+
+      ga4:                         # models/staging/ga4/**
+        +tags: ["ga4","staging"]
+
+      klaviyo:                     # models/staging/klaviyo/**
+        +tags: ["klaviyo","staging"]
+
+      woocommerce:                 # models/staging/woocommerce/**
+        +tags: ["woocommerce","staging"]
+
+      netsuite:                    # models/staging/netsuite/**   <-- add this folder
+        +tags: ["netsuite","staging"]
+
+    intermediate:                  # models/intermediate/**
       +materialized: table
+      +tags: ["intermediate"]
+
+      identity:                    # models/intermediate/identity/**
+        +tags: ["identity","intermediate"]
+
+      orders:                      # models/intermediate/orders/**
+        +tags: ["orders","intermediate"]
+
+      engagement:                  # models/intermediate/engagement/**
+        +tags: ["engagement","intermediate"]
+
+    marts:                         # models/marts/**
+      +materialized: table
+      +tags: ["mart"]
+
+      marketing:                   # models/marts/marketing/**
+        +schema: marketing         # optional: keep marts in a clean dataset
+        +tags: ["mart","marketing"]
+
+      web_seo:                     # models/marts/web_seo/**
+        +schema: marketing         # keep alongside marketing (or remove if you prefer default)
+        +tags: ["mart","web_seo"]
+
+# ---------- (Optional) Build convenience ----------
+# Use: dbt run --select tag:ai_demo to just build the demo pipeline
+# Tag individual demo models with "ai_demo" in their file-level config.
