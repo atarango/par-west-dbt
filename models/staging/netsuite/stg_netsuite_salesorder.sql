@@ -2,7 +2,9 @@
   alias='stg_netsuite_orders',
   materialized='incremental',
   partition_by={'field': 'order_date', 'data_type': 'date'},
-  cluster_by=['customer_email']
+  cluster_by=['customer_email'],
+  on_schema_change='append_new_columns',
+  contract={'enforced': true}
 ) }}
 
 with src as (
