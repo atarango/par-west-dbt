@@ -6,168 +6,332 @@ models:
       Staging model for WooCommerce customers. One row per customer from
       `raw_woocommerce.customers`, with normalized IDs, canonical email, names,
       and timestamps.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: wc_customer_id
         description: "WooCommerce internal customer id (cast to string)."
-        tests:
-          - not_null
-          - unique
+        data_type: string
+        tests: [not_null]
 
       - name: customer_email
         description: >
           Canonical email for the customer. Takes top-level email if present,
           else falls back to billing.email. Lowercased and trimmed.
+        data_type: string
         tests:
-          - not_null: { config: { severity: warn } }
-          # Optional email regex check if dbt_utils is installed
-          # - dbt_utils.expression_is_true:
-          #     expression: "REGEXP_CONTAINS({{ column_name }}, r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')"
-          #     config: { severity: warn }
+          - not_null:
+              config: {severity: warn}
 
       - name: first_name
-        description: "Customer first name from WooCommerce."
+        data_type: string
         tests:
-          - not_null: { config: { severity: warn } }
+          - not_null: {config: {severity: warn}}
 
       - name: last_name
-        description: "Customer last name from WooCommerce."
+        data_type: string
         tests:
-          - not_null: { config: { severity: warn } }
+          - not_null: {config: {severity: warn}}
 
       - name: first_seen_at
-        description: "Timestamp when the customer record was created in WooCommerce."
-        tests:
-          - not_null
+        description: "Timestamp when the customer record was created."
+        data_type: timestamp
+        tests: [not_null]
+
+      - name: raw_last_seen_at
+        description: "Raw source last-modified timestamp; may be null if never updated."
+        data_type: timestamp
 
       - name: last_seen_at
-        description: "Timestamp when the customer record was last modified in WooCommerce."
+        description: "Downstream-friendly last seen timestamp (coalesces raw_last_seen_at to first_seen_at)."
+        data_type: timestamp
         tests:
           - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                # NOTE: column name is implicit here (this column)
+                expression: ">= first_seen_at"
+
+      - name: last_seen_at_imputed
+        description: "Boolean flag indicating last_seen_at was filled from first_seen_at (raw_last_seen_at was null)."
+        data_type: boolean
+        tests: [not_null]
 
   - name: stg_woocommerce_orders
     description: >
       Staging model for WooCommerce orders. Cleans and standardizes raw order
       data from `raw_woocommerce.orders`, including customer info, totals, and
       order lifecycle timestamps.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: order_id
         description: "Unique identifier for the WooCommerce order."
-        tests:
-          - not_null
-          - unique
+        data_type: int64
+        tests: [not_null, unique]
+
       - name: order_number
         description: "Human-friendly order number from WooCommerce."
+        data_type: string
         tests:
           - not_null
+          - unique:
+              config: {severity: warn}   # order_number is usually unique; keep this as warn if unsure
+
       - name: order_status
         description: "WooCommerce order status (e.g., processing, completed)."
+        data_type: string
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['pending','processing','on-hold','completed','cancelled','refunded','failed','trash']
+                quote: true
+
       - name: order_total
         description: "Total amount of the order."
+        data_type: numeric
         tests:
           - not_null
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: discount_total
-        description: "Total discount amount applied to the order."
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: total_tax
-        description: "Total tax applied to the order."
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: shipping_total
-        description: "Total shipping cost for the order."
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: discount_tax
-        description: "Tax applied on the discount."
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: shipping_tax
-        description: "Tax applied on the shipping cost."
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+
       - name: customer_email
         description: "Email address of the customer who placed the order."
+        data_type: string
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "IS NULL OR REGEXP_CONTAINS({{ column_name }}, r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')"
+              config: {severity: warn}
+          - relationships:
+              to: ref('stg_woocommerce_customers')
+              field: customer_email
+              where: "customer_email is not null
+                      and order_date >= date_sub(current_date(), interval 18 month)"
+              config: {severity: warn}
+
       - name: wc_customer_id
         description: "WooCommerce internal customer ID."
+        data_type: string
+        tests: []
+
+      - name: is_guest_order
+        data_type: boolean
+
       - name: order_date
-        description: "Date (or timestamp) when the order was created."
-        tests:
-          - not_null
+        description: "Date when the order was created."
+        data_type: date
+        tests: [not_null]
+
       - name: paid_at
         description: "Timestamp when the order was paid."
+        data_type: timestamp
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                # implicit column is paid_at
+                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
+              config: {severity: warn}
+
       - name: completed_at
         description: "Timestamp when the order was completed."
+        data_type: timestamp
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
+              config: {severity: warn}
+
       - name: modified_at
         description: "Timestamp when the order was last modified."
+        data_type: timestamp
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
+              config: {severity: warn}
+
       - name: payment_method
         description: "Payment method used (e.g., credit_card, paypal)."
+        data_type: string
+
       - name: payment_method_title
         description: "Readable label of the payment method."
+        data_type: string
+
       - name: customer_note
         description: "Optional note left by the customer."
+        data_type: string
+
       - name: customer_ip_address
         description: "IP address of the customer placing the order."
+        data_type: string
+
       - name: customer_user_agent
         description: "User agent string of the customer’s browser/device."
+        data_type: string
 
-  - name: stg_woocommerce__order_items
+  - name: stg_woocommerce__order_items   # keep your current name (double underscore)
+    description: "One row per order line item."
+    config:
+      contract:
+        enforced: true
     columns:
       - name: order_id
+        data_type: int64
         tests: [not_null]
       - name: order_item_id
+        data_type: int64
         tests: [not_null]
       - name: sku
+        data_type: string
         tests:
           - not_null:
               where: "product_id is not null"
+      - name: subtotal
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+      - name: total_tax
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['order_id', 'order_item_id']
 
   - name: stg_woocommerce_shipping_lines
     description: >
       One row per shipping line on a WooCommerce order. Explodes
       `raw_woocommerce.orders.shipping_lines` and standardizes common fields.
+    config:
+      contract:
+        enforced: true
     columns:
       - name: order_id
         description: "WooCommerce order ID."
+        data_type: int64
         tests:
           - not_null
           - relationships:
               to: ref('stg_woocommerce_orders')
               field: order_id
+
       - name: order_ts
         description: "Timestamp when the order was created (warehouse timezone)."
+        data_type: timestamp
+
       - name: order_date
         description: "Partitioning date derived from order_ts."
-        tests:
-          - not_null
+        data_type: date
+        tests: [not_null]
+
       - name: shipping_line_id
         description: "Unique id of the shipping line within an order."
-        tests:
-          - not_null
-      - name: method_id
-        description: "Shipping method identifier (e.g., flexible_shipping_ups, FEDEX_*)."
-      - name: method_title
-        description: "Human-friendly shipping method name."
+        data_type: int64
+        tests: [not_null]
+
       - name: tax_status
         description: "WooCommerce tax status for this shipping line."
+        data_type: string
         tests:
           - accepted_values:
-              values: ['taxable', 'none']
-              quote: true
+              arguments:
+                values: ['taxable', 'none']
+                quote: true
+
       - name: shipping_total
         description: "Total shipping amount for this line."
+        data_type: numeric
         tests:
           - dbt_utils.expression_is_true:
-              expression: "shipping_total >= 0"
+              arguments:
+                expression: ">= 0"
+
       - name: shipping_tax_total
         description: "Total tax amount applied to this shipping line."
+        data_type: numeric
         tests:
           - dbt_utils.expression_is_true:
-              expression: "shipping_tax_total >= 0"
+              arguments:
+                expression: ">= 0"
+
       - name: carrier_service_code
-        description: "Inferred carrier/service code (from meta or method_id)."
+        data_type: string
       - name: service_type
-        description: "Carrier service type from meta (if provided)."
+        data_type: string
       - name: collection_point
-        description: "Collection/pickup point metadata (if provided)."
+        data_type: string
       - name: delivery_dates
-        description: "Delivery date information from meta (raw string)."
+        data_type: string
+
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: ['order_id', 'shipping_line_id']
+          arguments:
+            combination_of_columns: ['order_id', 'shipping_line_id']
 
   - name: stg_woocommerce__tax_lines
+    description: "One row per tax line per order."
+    config:
+      contract:
+        enforced: true
     columns:
       - name: order_id
+        data_type: int64
         tests: [not_null]
       - name: tax_line_id
+        data_type: int64
         tests: [not_null]
+      - name: tax_total
+        data_type: numeric
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: ">= 0"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['order_id', 'tax_line_id']

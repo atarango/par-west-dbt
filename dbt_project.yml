@@ -38,6 +38,7 @@ clean-targets:         # directories to be removed by `dbt clean`
 # ---------- Model configuration by folder ----------
 models:
   my_new_project:
+    +on_schema_change: fail
 
     # Global defaults (override below as needed)
     +persist_docs:
@@ -64,14 +65,14 @@ models:
       +materialized: table
       +tags: ["intermediate"]
 
-      identity:                    # models/intermediate/identity/**
-        +tags: ["identity","intermediate"]
+      #identity:                    # models/intermediate/identity/**
+      #  +tags: ["identity","intermediate"]
 
-      orders:                      # models/intermediate/orders/**
-        +tags: ["orders","intermediate"]
+      #orders:                      # models/intermediate/orders/**
+      #  +tags: ["orders","intermediate"]
 
-      engagement:                  # models/intermediate/engagement/**
-        +tags: ["engagement","intermediate"]
+      #engagement:                  # models/intermediate/engagement/**
+      #  +tags: ["engagement","intermediate"]
 
     marts:                         # models/marts/**
       +materialized: table
