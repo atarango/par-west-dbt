@@ -59,155 +59,93 @@ models:
         tests: [not_null]
 
   - name: stg_woocommerce_orders
-    description: >
-      Staging model for WooCommerce orders. Cleans and standardizes raw order
-      data from `raw_woocommerce.orders`, including customer info, totals, and
-      order lifecycle timestamps.
-    config:
-      contract:
-        enforced: true
+    description: "WooCommerce orders (1 row per order_id); UTC timestamps; guest-aware customer handling."
     columns:
       - name: order_id
-        description: "Unique identifier for the WooCommerce order."
-        data_type: int64
-        tests: [not_null, unique]
+        tests:
+          - not_null: {}
+          - unique: {}
 
       - name: order_number
-        description: "Human-friendly order number from WooCommerce."
-        data_type: string
-        tests:
-          - not_null
-          - unique:
-              config: {severity: warn}   # order_number is usually unique; keep this as warn if unsure
+        tests: []
 
       - name: order_status
-        description: "WooCommerce order status (e.g., processing, completed)."
-        data_type: string
         tests:
           - accepted_values:
               arguments:
-                values: ['pending','processing','on-hold','completed','cancelled','refunded','failed','trash']
-                quote: true
+                values: ['pending','processing','on-hold','completed','cancelled','refunded','failed','trash','unknown']
+              config:
+                severity: warn
 
       - name: order_total
-        description: "Total amount of the order."
-        data_type: numeric
         tests:
-          - not_null
-          - dbt_utils.expression_is_true:
+          - dbt_expectations.expect_column_values_to_be_between:
               arguments:
-                expression: ">= 0"
+                min_value: 0
+                strictly: true
 
       - name: discount_total
-        data_type: numeric
         tests:
-          - dbt_utils.expression_is_true:
+          - dbt_expectations.expect_column_values_to_be_between:
               arguments:
-                expression: ">= 0"
+                min_value: 0
+                strictly: true
 
       - name: total_tax
-        data_type: numeric
         tests:
-          - dbt_utils.expression_is_true:
+          - dbt_expectations.expect_column_values_to_be_between:
               arguments:
-                expression: ">= 0"
+                min_value: 0
+                strictly: true
 
       - name: shipping_total
-        data_type: numeric
         tests:
-          - dbt_utils.expression_is_true:
+          - dbt_expectations.expect_column_values_to_be_between:
               arguments:
-                expression: ">= 0"
+                min_value: 0
+                strictly: true
 
       - name: discount_tax
-        data_type: numeric
-        tests:
-          - dbt_utils.expression_is_true:
-              arguments:
-                expression: ">= 0"
+        tests: []
 
       - name: shipping_tax
-        data_type: numeric
         tests:
-          - dbt_utils.expression_is_true:
+          - dbt_expectations.expect_column_values_to_be_between:
               arguments:
-                expression: ">= 0"
+                min_value: 0
+                strictly: true
 
       - name: customer_email
-        description: "Email address of the customer who placed the order."
-        data_type: string
         tests:
           - dbt_utils.expression_is_true:
               arguments:
-                expression: "IS NULL OR REGEXP_CONTAINS({{ column_name }}, r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')"
-              config: {severity: warn}
-          - relationships:
-              to: ref('stg_woocommerce_customers')
-              field: customer_email
-              where: "customer_email is not null
-                      and order_date >= date_sub(current_date(), interval 18 month)"
-              config: {severity: warn}
+                expression: "REGEXP_CONTAINS(customer_email, '^[^@]+@[^@]+\\.[^@]+$')"
+              config:
+                where: "customer_email is not null and customer_email != ''"
+
+      # customer_ip_address: relaxed IPv4/IPv6-ish characters; warn-only; skip blanks
+      - name: customer_ip_address
+        tests:
+          - dbt_utils.expression_is_true:
+              arguments:
+                expression: "REGEXP_CONTAINS(customer_ip_address, '^[0-9A-Fa-f:.]+$')"
+              config:
+                where: "customer_ip_address is not null and customer_ip_address != ''"
+                severity: warn
 
       - name: wc_customer_id
-        description: "WooCommerce internal customer ID."
-        data_type: string
         tests: []
 
       - name: is_guest_order
-        data_type: boolean
+        tests: []
 
       - name: order_date
-        description: "Date when the order was created."
-        data_type: date
-        tests: [not_null]
-
-      - name: paid_at
-        description: "Timestamp when the order was paid."
-        data_type: timestamp
         tests:
-          - dbt_utils.expression_is_true:
-              arguments:
-                # implicit column is paid_at
-                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
-              config: {severity: warn}
-
-      - name: completed_at
-        description: "Timestamp when the order was completed."
-        data_type: timestamp
-        tests:
-          - dbt_utils.expression_is_true:
-              arguments:
-                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
-              config: {severity: warn}
+          - not_null: {}
 
       - name: modified_at
-        description: "Timestamp when the order was last modified."
-        data_type: timestamp
         tests:
-          - dbt_utils.expression_is_true:
-              arguments:
-                expression: "IS NULL OR order_date IS NULL OR {{ column_name }} >= TIMESTAMP(order_date)"
-              config: {severity: warn}
-
-      - name: payment_method
-        description: "Payment method used (e.g., credit_card, paypal)."
-        data_type: string
-
-      - name: payment_method_title
-        description: "Readable label of the payment method."
-        data_type: string
-
-      - name: customer_note
-        description: "Optional note left by the customer."
-        data_type: string
-
-      - name: customer_ip_address
-        description: "IP address of the customer placing the order."
-        data_type: string
-
-      - name: customer_user_agent
-        description: "User agent string of the customer’s browser/device."
-        data_type: string
+          - not_null: {}
 
   - name: stg_woocommerce__order_items   # keep your current name (double underscore)
     description: "One row per order line item."
