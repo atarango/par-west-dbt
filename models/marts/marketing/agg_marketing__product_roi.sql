@@ -1,59 +1,87 @@
+-- models/marts/marketing/agg_marketing__product_roi.sql
 {{ config(materialized='view') }}
 
--- Aggregates SKU-level ROI using:
---  - fct_marketing__product_attrib (line-level revenue & margin with campaign_id/name + click_dt/order_date)
---  - stg_google_ads__campaign_daily_cost (daily spend by campaign_id from keyword_view)
---  - stg_google_ads__campaign_dim (optional: enrich names from raw_google_ads.campaign)
-
-WITH cost AS (
-  -- Daily campaign spend (no campaign_name here)
+WITH f AS (
   SELECT
-    date,
+    order_id,
+    LOWER(sku) AS sku,
     campaign_id,
-    cost
-  FROM {{ ref('stg_google_ads__campaign_daily_cost') }}
+    campaign_name,
+    attrib_date,
+    attributed_revenue,
+    attributed_margin
+  FROM {{ ref('fct_marketing__product_attrib') }}
+  WHERE campaign_id IS NOT NULL
 ),
 
-facts AS (
-  -- Product-line facts with attribution
+-- cost by (campaign_id, date)
+cost_campaign AS (
+  SELECT
+    CAST(campaign_id AS STRING) AS campaign_id,
+    CAST(segments_date AS DATE) AS cost_date,
+    SUM(SAFE_DIVIDE(metrics_cost_micros, 1e6)) AS spend_amount
+  FROM {{ source('raw_google_ads','campaign') }}
+  WHERE segments_date IS NOT NULL
+  GROUP BY 1,2
+),
+cost_kw AS (
+  SELECT
+    CAST(campaign_id AS STRING) AS campaign_id,
+    CAST(segments_date AS DATE) AS cost_date,
+    SUM(SAFE_DIVIDE(metrics_cost_micros, 1e6)) AS spend_amount
+  FROM {{ source('raw_google_ads','keyword_view') }}
+  WHERE segments_date IS NOT NULL
+  GROUP BY 1,2
+),
+cost_dkw AS (
+  SELECT
+    CAST(campaign_id AS STRING) AS campaign_id,
+    CAST(segments_date AS DATE) AS cost_date,
+    SUM(SAFE_DIVIDE(metrics_cost_micros, 1e6)) AS spend_amount
+  FROM {{ source('raw_google_ads','display_keyword_view') }}
+  WHERE segments_date IS NOT NULL
+  GROUP BY 1,2
+),
+cost_union AS (
+  SELECT * FROM cost_campaign
+  UNION ALL SELECT * FROM cost_kw
+  UNION ALL SELECT * FROM cost_dkw
+),
+cost AS (
+  SELECT campaign_id, cost_date AS attrib_date, SUM(spend_amount) AS spend
+  FROM cost_union
+  GROUP BY 1,2
+),
+
+rev_by_cd AS (
+  SELECT campaign_id, attrib_date, SUM(attributed_revenue) AS revenue_cd
+  FROM f
+  GROUP BY 1,2
+),
+
+alloc AS (
   SELECT
     f.sku,
     f.campaign_id,
-    -- Keep the name coming from click_view (via bridge). May be null if no click matched.
-    f.campaign_name,
-    COALESCE(DATE(f.click_dt), f.order_date) AS date_key,
-    f.attributed_revenue,
-    f.attributed_margin
-  FROM {{ ref('fct_marketing__product_attrib') }} f
-),
-
-names AS (
-  -- Optional enrichment: campaign names from the campaign table.
-  -- If your campaign table uses a different column (e.g., campaign_name), swap "name" below accordingly.
-  SELECT
-    CAST(campaign_id AS STRING) AS campaign_id,
-    ANY_VALUE(campaign_name)    AS campaign_name
-  FROM {{ source('raw_google_ads','campaign') }}
-  GROUP BY 1
+    ANY_VALUE(f.campaign_name) AS sample_campaign,
+    f.attrib_date,
+    SUM(f.attributed_revenue) AS revenue,
+    SUM(f.attributed_margin)  AS margin,
+    SUM( COALESCE(c.spend, 0) * SAFE_DIVIDE(f.attributed_revenue, NULLIF(r.revenue_cd, 0)) ) AS ad_cost
+  FROM f
+  LEFT JOIN cost      c ON c.campaign_id = f.campaign_id AND c.attrib_date = f.attrib_date
+  LEFT JOIN rev_by_cd r ON r.campaign_id = f.campaign_id AND r.attrib_date = f.attrib_date
+  GROUP BY 1,2,4
 )
 
 SELECT
-  f.sku,
-  ANY_VALUE(f.campaign_id)                                        AS campaign_id,
-  -- Prefer the campaign name from facts (click_view). Fall back to the campaign table when missing.
-  ANY_VALUE(COALESCE(f.campaign_name, n.campaign_name))           AS sample_campaign,
-  SUM(f.attributed_revenue)                                       AS revenue,
-  SUM(f.attributed_margin)                                        AS margin,
-  SUM(IFNULL(c.cost, 0))                                          AS ad_cost,
-  SAFE_DIVIDE(SUM(f.attributed_margin) - SUM(IFNULL(c.cost, 0)),
-              NULLIF(SUM(IFNULL(c.cost, 0)), 0))                  AS roi_margin,
-  SAFE_DIVIDE(SUM(f.attributed_revenue) - SUM(IFNULL(c.cost, 0)),
-              NULLIF(SUM(IFNULL(c.cost, 0)), 0))                  AS roi_revenue
-FROM facts f
-LEFT JOIN cost  c
-  ON c.campaign_id = f.campaign_id
- AND c.date        = f.date_key
-LEFT JOIN names n
-  ON n.campaign_id = f.campaign_id
-GROUP BY f.sku
-ORDER BY roi_margin DESC
+  sku,
+  campaign_id,
+  sample_campaign,
+  SUM(revenue) AS revenue,
+  SUM(margin)  AS margin,
+  SUM(ad_cost) AS ad_cost,
+  SUM(margin)  - SUM(ad_cost) AS roi_margin,
+  SUM(revenue) - SUM(ad_cost) AS roi_revenue
+FROM alloc
+GROUP BY 1,2,3

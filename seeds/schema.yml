@@ -1,0 +1,11 @@
+version: 2
+
+seeds:
+  - name: ads_campaign_name_map
+    description: "Maps normalized GA4/Woo utm_campaign values to Google Ads campaign_id/name."
+    columns:
+      - name: utm_campaign_norm
+        tests: [not_null, unique]
+      - name: campaign_id
+        tests: [not_null]
+      - name: campaign_name
