@@ -1,23 +1,20 @@
-{{ config(materialized='view') }}
+{{ config(materialized='view', alias='stg_ga4__purchases') }}
 
--- Minimal purchase feed based on your CSV export.
--- Fields match what the bridge expects (transaction_id, utm_campaign, event_ts).
-WITH src AS (
-  SELECT
-    CAST(transaction_id AS STRING)                                 AS transaction_id,
-    CAST(event_date AS DATE)                                       AS event_date,
-    CAST(session_campaign AS STRING)                               AS utm_campaign,
-    -- split "source / medium" if provided
-    SPLIT(CAST(session_source AS STRING), ' / ')[OFFSET(0)] AS utm_source,
-    SPLIT(CAST(session_medium AS STRING), ' / ')[OFFSET(1)] AS utm_medium,
-    CAST(purchase_revenue AS NUMERIC)                              AS purchase_revenue
-  FROM `par-west-ai-dashboard.raw_ga4.purchase_export`
-  WHERE transaction_id IS NOT NULL
-)
 SELECT
-  event_date,
-  TIMESTAMP(event_date) AS event_ts,   -- GA4 export has only date; good enough for our join
-  transaction_id,
-  NULL AS gclid,                       -- CSV won’t include gclid; bridge will use UTM path
-  utm_campaign
-FROM src
+  CAST(transaction_id AS STRING)       AS transaction_id,
+  CAST(event_date AS DATE)             AS event_date,
+  TIMESTAMP(CAST(event_date AS DATE))  AS event_ts,
+  CAST(NULL AS STRING)                 AS gclid,  -- keep string type
+
+  -- Null out direct/none and (not set)
+  CASE
+    WHEN LOWER(TRIM(session_source)) IN ('(direct)','direct')
+     AND LOWER(TRIM(session_medium)) IN ('(none)','none') THEN NULL
+    WHEN LOWER(TRIM(session_campaign)) IN ('(not set)','not set') THEN NULL
+    ELSE NULLIF(TRIM(CAST(session_campaign AS STRING)), '')
+  END AS utm_campaign,
+
+  NULLIF(TRIM(CAST(session_source AS STRING)), '') AS session_source,
+  NULLIF(TRIM(CAST(session_medium AS STRING)), '') AS session_medium
+FROM `par-west-ai-dashboard.raw_ga4.purchase_export`
+WHERE transaction_id IS NOT NULL AND transaction_id != ''
