@@ -1,6 +1,13 @@
 version: 2
 
 models:
+  - name: stg_ga4__purchases
+    description: "Purchases extracted from GA4 BigQuery export"
+    columns:
+      - name: transaction_id
+        tests:
+          - not_null
+          
   - name: stg_ga4__traffic_source
     description: "Staging GA4 traffic acquisition data"
     columns:
